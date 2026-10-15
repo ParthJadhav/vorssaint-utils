@@ -76,6 +76,14 @@ enum NotchAgentSupport {
             && NotchSupport.modules(in: defaults).contains(.agents)
     }
 
+    /// Reading serves either surface. A pinned agent is an explicit opt-in,
+    /// independent of the providers selected for the island's page.
+    static func readingProviders(in defaults: UserDefaults = .standard) -> [AgentProvider] {
+        let island = isEnabled(in: defaults) ? providers(in: defaults) : []
+        let menuBar = MenuBarAgentSupport.providers(in: defaults)
+        return AgentProvider.allCases.filter { island.contains($0) || menuBar.contains($0) }
+    }
+
     static func providers(in defaults: UserDefaults = .standard) -> [AgentProvider] {
         AgentProvider.allCases.filter {
             defaults.object(forKey: key(for: $0)) as? Bool ?? true
@@ -274,6 +282,48 @@ enum NotchAgentSupport {
     static func contentHeight(_ rows: [[NotchAgentTile]]) -> CGFloat {
         guard !rows.isEmpty else { return 0 }
         return rows.map(height).reduce(0, +) + spacing * CGFloat(rows.count - 1)
+    }
+}
+
+/// Menu bar quotas reuse the island's local readings, without requiring its UI.
+enum MenuBarAgentSupport {
+    static func providers(in defaults: UserDefaults = .standard) -> [AgentProvider] {
+        guard AppFeature.notchAgents.isAvailable(in: defaults) else { return [] }
+        return [AgentProvider.claude, .codex].filter {
+            defaults.bool(forKey: $0 == .claude ? DefaultsKey.menuBarClaudeUsage : DefaultsKey.menuBarCodexUsage)
+        }
+    }
+
+    static func focus(in defaults: UserDefaults = .standard) -> NotchAgentLimitFocus {
+        NotchAgentLimitFocus(rawValue: defaults.string(forKey: DefaultsKey.menuBarAgentLimitFocus) ?? "") ?? .mostUsed
+    }
+
+    static func display(in defaults: UserDefaults = .standard) -> NotchAgentLimitDisplay {
+        NotchAgentLimitDisplay(rawValue: defaults.string(forKey: DefaultsKey.menuBarAgentLimitDisplay) ?? "") ?? .used
+    }
+
+    static func window(for provider: AgentProvider, in snapshot: AgentUsageSnapshot,
+                       defaults: UserDefaults = .standard, now: Date = Date()) -> AgentLimitWindow? {
+        // A missing or malformed reading must never look like an unused plan.
+        guard snapshot.loaded, var limits = snapshot.limits[provider] else { return nil }
+        limits.windows.removeAll { !$0.usedPercent.isFinite || $0.scope != nil }
+        return NotchAgentSupport.focusedLimit(limits, focus: focus(in: defaults), now: now)
+    }
+
+    static func fraction(for window: AgentLimitWindow, in defaults: UserDefaults = .standard) -> Double {
+        display(in: defaults) == .used ? window.usedFraction : window.remainingFraction
+    }
+
+    static func tooltip(for provider: AgentProvider, snapshot: AgentUsageSnapshot,
+                        defaults: UserDefaults = .standard, now: Date = Date()) -> String {
+        let text = FeatureStrings.notchAgents(L10n.shared.language)
+        guard let window = window(for: provider, in: snapshot, defaults: defaults, now: now) else {
+            return provider.displayName + " · " + text.waitingForLimits
+        }
+        let share = AgentFormat.percent(fraction(for: window, in: defaults))
+        let reading = display(in: defaults) == .used ? text.usedShare(share) : text.left(share)
+        let kind = window.kind == .session ? text.session : window.kind == .weekly ? text.weekly : text.limitsCard
+        return provider.displayName + " · " + kind + " · " + reading
     }
 }
 

@@ -1084,7 +1084,7 @@ final class NotchService: ObservableObject {
         if !NotchFileToolsService.shared.offersMediaDrop { endFileDrop() }
         // Paused while the island is away, the section still stops at once
         // when it is turned off.
-        if !NotchAgentSupport.isEnabled() { AgentUsageService.shared.stop() }
+        if NotchAgentSupport.readingProviders().isEmpty { AgentUsageService.shared.stop() }
         guard !suspended else {
             if session.canRunTimer { NotchTimerService.shared.syncWithPreferences() }
             else { NotchTimerService.shared.suspend() }
@@ -1166,7 +1166,8 @@ final class NotchService: ObservableObject {
         preferenceSyncWork?.cancel(); preferenceSyncWork = nil
         NotchLyricsService.shared.stop()
         NotchFileToolsService.shared.stop()
-        AgentUsageService.shared.stop()
+        if MenuBarAgentSupport.providers().isEmpty { AgentUsageService.shared.stop() }
+        else { AgentUsageService.shared.syncWithPreferences() }
         guard running else { return }
         running = false
         NotchTimerService.shared.stop()
@@ -1228,7 +1229,8 @@ final class NotchService: ObservableObject {
         NotchDownloadService.shared.stop()
         NotchCalendarService.shared.stop()
         NotchNotificationService.shared.stop()
-        AgentUsageService.shared.pause()
+        // With a pinned quota, the menu bar still needs readings while the island is away.
+        if MenuBarAgentSupport.providers().isEmpty { AgentUsageService.shared.pause() }
         settingsSignature = ""
         expanded = false
         peeking = false

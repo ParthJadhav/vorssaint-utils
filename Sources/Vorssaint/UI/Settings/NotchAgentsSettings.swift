@@ -8,6 +8,8 @@ import SwiftUI
 struct NotchAgentsSettingsControls: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var usage = AgentUsageService.shared
+    @AppStorage(DefaultsKey.menuBarClaudeUsage) private var menuBarClaude = false
+    @AppStorage(DefaultsKey.menuBarCodexUsage) private var menuBarCodex = false
     @AppStorage(DefaultsKey.notchAgentsClaude) private var claude = true
     @AppStorage(DefaultsKey.notchAgentsCodex) private var codex = true
     @AppStorage(DefaultsKey.notchAgentsOpenCode) private var opencode = true
@@ -49,6 +51,11 @@ struct NotchAgentsSettingsControls: View {
             providerRow(.codex, isOn: $codex)
             providerRow(.opencode, isOn: $opencode)
             providerRow(.copilot, isOn: $copilot)
+
+            Divider()
+            Text(l10n.s.monitorMenuBarSection).font(.subheadline.weight(.medium))
+            switchRow("menubar.rectangle", AgentProvider.claude.displayName, isOn: $menuBarClaude)
+            switchRow("menubar.rectangle", AgentProvider.codex.displayName, isOn: $menuBarCodex)
 
             Divider()
             Text(text.cardsTitle).font(.subheadline.weight(.medium))

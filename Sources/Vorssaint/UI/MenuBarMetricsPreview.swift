@@ -8,6 +8,11 @@ import SwiftUI
 /// visual cost before they occupy the actual menu bar.
 struct MenuBarMetricsPreview: View {
     @ObservedObject private var monitor = SystemMonitor.shared
+    @ObservedObject private var agents = AgentUsageService.shared
+    @AppStorage(DefaultsKey.menuBarClaudeUsage) private var claudeUsage = false
+    @AppStorage(DefaultsKey.menuBarCodexUsage) private var codexUsage = false
+    @AppStorage(DefaultsKey.menuBarAgentLimitFocus) private var agentFocus = "mostUsed"
+    @AppStorage(DefaultsKey.menuBarAgentLimitDisplay) private var agentDisplay = "used"
     @AppStorage(DefaultsKey.menuBarCPU) private var cpu = false
     @AppStorage(DefaultsKey.menuBarGPU) private var gpu = false
     @AppStorage(DefaultsKey.menuBarMemory) private var memory = false
@@ -43,6 +48,8 @@ struct MenuBarMetricsPreview: View {
     @ObservedObject private var l10n = L10n.shared
 
     var body: some View {
+        let _ = agentFocus
+        let _ = agentDisplay
         let _ = metricOrder
         let _ = combineTemperatures
         let _ = metricAppearance
@@ -59,12 +66,12 @@ struct MenuBarMetricsPreview: View {
         let _ = networkSpeedUnit
         let _ = metricSpacing
         let metrics = activeMetrics
-        let lines = separateMetrics ? [] : MenuBarRenderer.lines(for: monitor.snapshot, metrics: metrics)
+        let lines = separateMetrics ? [] : MenuBarRenderer.lines(for: monitor.snapshot, metrics: metrics, agents: agents.snapshot)
         // Separate items are their own status items, which macOS seats to
         // the left of the one that was there first.
         let items = separateMetrics
             ? StatusItemController.metricStatusGroups(for: metrics, strings: l10n.s)
-                .map { MenuBarRenderer.lines(for: monitor.snapshot, metrics: $0.metrics) }
+                .map { MenuBarRenderer.lines(for: monitor.snapshot, metrics: $0.metrics, agents: agents.snapshot) }
                 .filter { !$0.isEmpty }
             : []
         // The steady state of the hide option: a pending update, a running
@@ -121,6 +128,8 @@ struct MenuBarMetricsPreview: View {
     }
 
     private var activeMetrics: [MenuBarMetric] {
+        let _ = claudeUsage
+        let _ = codexUsage
         let _ = cpu
         let _ = gpu
         let _ = memory

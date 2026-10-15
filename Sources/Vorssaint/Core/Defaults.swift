@@ -373,6 +373,10 @@ enum DefaultsKey {
     static let panelToggleScreenSaver = "panelToggleScreenSaver"
 
     // System monitor — live metrics shown next to the menu bar icon (opt-in).
+    static let menuBarClaudeUsage = "menuBarClaudeUsage"
+    static let menuBarCodexUsage = "menuBarCodexUsage"
+    static let menuBarAgentLimitFocus = "menuBarAgentLimitFocus"
+    static let menuBarAgentLimitDisplay = "menuBarAgentLimitDisplay"
     static let menuBarCPU = "menuBarCPU"
     static let menuBarGPU = "menuBarGPU"
     static let menuBarMemory = "menuBarMemory"
@@ -1160,6 +1164,7 @@ enum Defaults {
         "memory",
         "battery", "batteryTime", "batteryTemperature", "peripheralBattery",
         "network", "diskUsage", "diskActivity", "connectedDevices", "power", "fanSpeed",
+        "claudeUsage", "codexUsage",
     ]
     static let allowedMenuBarLabelStyles = ["compact", "classic"]
     static let allowedMenuBarMemoryStyles = ["dot", "percent", "both"]
@@ -1597,6 +1602,10 @@ enum Defaults {
         // they don't want.
         DefaultsKey.monitorInterval: 2,
         DefaultsKey.temperatureUnit: TemperatureUnit.celsius.rawValue,
+        DefaultsKey.menuBarClaudeUsage: false,
+        DefaultsKey.menuBarCodexUsage: false,
+        DefaultsKey.menuBarAgentLimitFocus: NotchAgentLimitFocus.mostUsed.rawValue,
+        DefaultsKey.menuBarAgentLimitDisplay: NotchAgentLimitDisplay.used.rawValue,
         DefaultsKey.menuBarCPUTemperature: false,
         DefaultsKey.menuBarGPUTemperature: false,
         DefaultsKey.menuBarBatteryTemperature: false,

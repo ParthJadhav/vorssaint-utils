@@ -380,6 +380,8 @@ private struct MenuBarMetricTile: View {
     @Environment(\.colorScheme) private var colorScheme
     let metric: MenuBarMetric
     @AppStorage private var shown: Bool
+    @AppStorage(DefaultsKey.menuBarAgentLimitFocus) private var agentFocus = "mostUsed"
+    @AppStorage(DefaultsKey.menuBarAgentLimitDisplay) private var agentDisplay = "used"
     @AppStorage(DefaultsKey.menuBarMemoryStyle) private var memoryStyle = "percent"
     @AppStorage(DefaultsKey.menuBarNetworkUploadFirst) private var uploadFirst = false
     @AppStorage(DiskMenuBarStyle.defaultsKey) private var diskStyle = DiskMenuBarStyle.percent
@@ -397,6 +399,9 @@ private struct MenuBarMetricTile: View {
     /// What the reading's option makes the menu bar show, in its own terms.
     private var optionsSummary: String {
         switch metric {
+        case .claudeUsage, .codexUsage:
+            let text = FeatureStrings.notchAgents(l10n.language)
+            return agentDisplay == "remaining" ? text.remaining : text.used
         case .memory:
             return Defaults.sanitizedMenuBarMemoryStyle(memoryStyle) != "percent"
                 ? l10n.s.monitorMemoryPressureDot : FeatureStrings.mouseClickDebounce(l10n.language).moreOptions
@@ -413,6 +418,19 @@ private struct MenuBarMetricTile: View {
 
     private var options: AnyView? {
         switch metric {
+        case .claudeUsage, .codexUsage:
+            let text = FeatureStrings.notchAgents(l10n.language)
+            return AnyView(VStack(alignment: .leading, spacing: 10) {
+                SettingsChoiceRow(symbol: "percent", title: text.limitsAs, selection: $agentDisplay) {
+                    Text(text.used).tag(NotchAgentLimitDisplay.used.rawValue)
+                    Text(text.remaining).tag(NotchAgentLimitDisplay.remaining.rawValue)
+                }
+                SettingsMenuRow(symbol: "clock", title: text.limitFocus, selection: $agentFocus) {
+                    ForEach(NotchAgentLimitFocus.allCases) { focus in
+                        Text(text.limitFocus(focus)).tag(focus.rawValue)
+                    }
+                }
+            })
         case .memory:
             return AnyView(MonitorTokenOption(
                 symbol: "circle.fill",

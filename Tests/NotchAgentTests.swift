@@ -36,9 +36,77 @@ enum NotchAgentTests {
         AgentCodexResetTests.run(suite)
         preferences(suite)
         agentDefaults(suite)
+        menuBar(suite)
         formatting(suite)
         AgentUsageEventDeliveryTests.run(suite)
         NotchAgentAnimationTests.run { suite.expect($0, $1) }
+    }
+
+    private static func menuBar(_ suite: TestSuite) {
+        let domain = "vorss.tests.agent-menu-bar.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        defaults.set(false, forKey: DefaultsKey.notchEnabled)
+        defaults.set(false, forKey: DefaultsKey.notchAgentsEnabled)
+        defaults.set(true, forKey: AppFeature.notchAgents.availabilityKey)
+        suite.expect(NotchAgentSupport.readingProviders(in: defaults).isEmpty,
+                     "no agent reader starts with both surfaces off")
+        defaults.set(true, forKey: DefaultsKey.menuBarCodexUsage)
+        suite.expect(NotchAgentSupport.readingProviders(in: defaults) == [.codex],
+                     "a pinned Codex reads only Codex without Dynamic Island")
+        defaults.set(true, forKey: DefaultsKey.menuBarClaudeUsage)
+        suite.expect(NotchAgentSupport.readingProviders(in: defaults) == [.claude, .codex],
+                     "both pinned agents read without installing the island")
+        defaults.set(false, forKey: AppFeature.notchAgents.availabilityKey)
+        suite.expect(NotchAgentSupport.readingProviders(in: defaults).isEmpty,
+                     "uninstalling AI Agents stops even pinned readers")
+        defaults.set(true, forKey: AppFeature.notchAgents.availabilityKey)
+        defaults.set(false, forKey: DefaultsKey.menuBarClaudeUsage)
+        defaults.set(false, forKey: DefaultsKey.menuBarCodexUsage)
+        suite.expect(NotchAgentSupport.readingProviders(in: defaults).isEmpty,
+                     "unpinning the final agent stops reading")
+
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let session = AgentLimitWindow(id: "session", kind: .session, minutes: 300, scope: nil,
+                                      usedPercent: 25, resetsAt: now.addingTimeInterval(300))
+        let weekly = AgentLimitWindow(id: "weekly", kind: .weekly, minutes: 10_080, scope: nil,
+                                     usedPercent: 80, resetsAt: now.addingTimeInterval(600))
+        var snapshot = AgentUsageSnapshot()
+        suite.expect(MenuBarAgentSupport.window(for: .codex, in: snapshot, defaults: defaults, now: now) == nil,
+                     "loading does not report an unused quota")
+        snapshot.loaded = true
+        snapshot.limits[.codex] = AgentLimits(provider: .codex, windows: [session, weekly],
+                                             observedAt: now, source: .sessionLog)
+        func selected() -> AgentLimitWindow? {
+            MenuBarAgentSupport.window(for: .codex, in: snapshot, defaults: defaults, now: now)
+        }
+        suite.expect(selected()?.id == "weekly", "automatic menu bar quota picks the most used window")
+        suite.expect(MenuBarAgentSupport.fraction(for: weekly, in: defaults) == 0.8,
+                     "menu bar percentages default to used")
+        defaults.set("remaining", forKey: DefaultsKey.menuBarAgentLimitDisplay)
+        suite.expectClose(MenuBarAgentSupport.fraction(for: weekly, in: defaults), 0.2,
+                          "remaining quota is distinct from usage")
+        defaults.set("session", forKey: DefaultsKey.menuBarAgentLimitFocus)
+        suite.expect(selected()?.id == "session", "the session quota can be pinned independently of the island")
+        defaults.set("weekly", forKey: DefaultsKey.menuBarAgentLimitFocus)
+        suite.expect(selected()?.id == "weekly", "the weekly quota can be pinned")
+        snapshot.limits[.codex]?.windows = [session]
+        suite.expect(selected()?.id == "session", "a missing chosen window uses the known plan window")
+        snapshot.limits[.codex]?.windows = [AgentLimitWindow(id: "model", kind: .weekly, minutes: nil,
+            scope: "model-only", usedPercent: 99, resetsAt: nil),
+            AgentLimitWindow(id: "bad", kind: .session, minutes: nil, scope: nil,
+                             usedPercent: .nan, resetsAt: nil)]
+        suite.expect(selected() == nil, "model-only and malformed limits never stand in for a plan quota")
+        snapshot.limits[.codex]?.windows = [session]
+        suite.expect(MenuBarAgentSupport.window(for: .codex, in: snapshot, defaults: defaults,
+                                               now: now.addingTimeInterval(301))?.usedPercent == 0,
+                     "a confirmed renewal clears the old reading")
+        suite.expect(MenuBarAgentSupport.window(for: .claude, in: snapshot, defaults: defaults, now: now) == nil,
+                     "one agent's quota never fills in for another")
+        let keys = SettingsBackupSupport.exportKeys()
+        suite.expect([DefaultsKey.menuBarClaudeUsage, DefaultsKey.menuBarCodexUsage,
+                      DefaultsKey.menuBarAgentLimitFocus, DefaultsKey.menuBarAgentLimitDisplay].allSatisfy(keys.contains),
+                     "agent menu bar selections and display options travel in settings backups")
     }
 
     private static func line(_ json: String) -> Data { Data(json.utf8) }
