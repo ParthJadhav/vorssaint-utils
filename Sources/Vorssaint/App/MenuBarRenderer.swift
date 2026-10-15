@@ -5,14 +5,16 @@ import AppKit
 
 /// A live reading the user can pin next to the menu bar icon.
 enum MenuBarMetric: String, CaseIterable, Identifiable {
-    case claudeUsage, codexUsage, cpu, gpu, memory, cpuTemperature, gpuTemperature, batteryTemperature, network, diskUsage, diskActivity, battery, batteryTime, peripheralBattery, power, fanSpeed, connectedDevices
+    case claudeUsage, codexUsage, openCodeUsage, copilotUsage, cpu, gpu, memory, cpuTemperature, gpuTemperature, batteryTemperature, network, diskUsage, diskActivity, battery, batteryTime, peripheralBattery, power, fanSpeed, connectedDevices
 
     var id: String { rawValue }
 
     var defaultsKey: String {
         switch self {
-        case .claudeUsage: return DefaultsKey.menuBarClaudeUsage
-        case .codexUsage: return DefaultsKey.menuBarCodexUsage
+        case .claudeUsage: return MenuBarAgentSupport.enabledKey(for: .claude)
+        case .codexUsage: return MenuBarAgentSupport.enabledKey(for: .codex)
+        case .openCodeUsage: return MenuBarAgentSupport.enabledKey(for: .opencode)
+        case .copilotUsage: return MenuBarAgentSupport.enabledKey(for: .copilot)
         case .cpu: return DefaultsKey.menuBarCPU
         case .gpu: return DefaultsKey.menuBarGPU
         case .memory: return DefaultsKey.menuBarMemory
@@ -35,6 +37,8 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         switch self {
         case .claudeUsage: return AgentProvider.claude.symbol
         case .codexUsage: return AgentProvider.codex.symbol
+        case .openCodeUsage: return AgentProvider.opencode.symbol
+        case .copilotUsage: return AgentProvider.copilot.symbol
         case .cpu: return "cpu"
         case .gpu: return "rectangle.connected.to.line.below"
         case .memory: return "memorychip"
@@ -57,6 +61,8 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         switch self {
         case .claudeUsage: return AgentProvider.claude.displayName
         case .codexUsage: return AgentProvider.codex.displayName
+        case .openCodeUsage: return AgentProvider.opencode.displayName
+        case .copilotUsage: return AgentProvider.copilot.displayName
         case .cpu: return strings.monitorShowCPU
         case .gpu: return strings.monitorShowGPU
         case .memory: return strings.monitorShowMemory
@@ -81,7 +87,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         .memory,
         .battery, .batteryTime, .batteryTemperature, .peripheralBattery,
         .network, .diskUsage, .diskActivity, .connectedDevices, .power, .fanSpeed,
-        .claudeUsage, .codexUsage,
+        .claudeUsage, .codexUsage, .openCodeUsage, .copilotUsage,
     ]
 
     static func order(in defaults: UserDefaults) -> [MenuBarMetric] {
@@ -99,7 +105,7 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
     /// pinned in defaults but stops rendering (and sampling) until it returns.
     var feature: AppFeature {
         switch self {
-        case .claudeUsage, .codexUsage: return .notchAgents
+        case .claudeUsage, .codexUsage, .openCodeUsage, .copilotUsage: return .notchAgents
         case .cpu, .cpuTemperature: return .monitorCPU
         case .gpu, .gpuTemperature: return .monitorGPU
         case .memory: return .monitorMemory
@@ -115,6 +121,8 @@ enum MenuBarMetric: String, CaseIterable, Identifiable {
         switch self {
         case .claudeUsage: return .claude
         case .codexUsage: return .codex
+        case .openCodeUsage: return .opencode
+        case .copilotUsage: return .copilot
         default: return nil
         }
     }
@@ -215,7 +223,8 @@ enum MenuBarSegment {
     case largeSymbol(String)
     case metricBlock(label: String, value: String, minimumValue: String, style: MenuBarBlockStyle,
                      pressure: MemoryPressure?, warning: BatteryWarning = .none)
-    case usageBarBlock(label: String, fraction: Double?, style: MenuBarBlockStyle, pressure: MemoryPressure?)
+    case usageBarBlock(label: String, fraction: Double?, style: MenuBarBlockStyle, pressure: MemoryPressure?,
+                       colorFraction: Double? = nil)
     case networkBlock(down: String, up: String, style: MenuBarBlockStyle)
     case diskActivityBlock(read: String, write: String, style: MenuBarBlockStyle)
     case batteryBlock(percent: Int, isCharging: Bool, externalConnected: Bool,
@@ -372,16 +381,15 @@ enum MenuBarRenderer {
 
         for metric in metrics {
             switch metric {
-            case .claudeUsage, .codexUsage:
+            case .claudeUsage, .codexUsage, .openCodeUsage, .copilotUsage:
                 guard let provider = metric.agentProvider else { break }
-                let fraction = MenuBarAgentSupport.window(for: provider, in: agents)
-                    .map { MenuBarAgentSupport.fraction(for: $0) }
-                if usesBars {
-                    groups.append([.usageBarBlock(label: provider.displayName, fraction: fraction,
-                                                  style: style, pressure: nil)])
+                let reading = MenuBarAgentSupport.reading(for: provider, snapshot: agents)
+                if usesBars, MenuBarAgentSupport.readout(for: provider) == .limit {
+                    groups.append([.usageBarBlock(label: provider.displayName, fraction: reading.fraction,
+                                                  style: style, pressure: nil, colorFraction: reading.usedFraction)])
                 } else {
                     groups.append([.metricBlock(label: provider.displayName,
-                                                value: fraction.map { AgentFormat.percent($0) } ?? "—",
+                                                value: reading.value,
                                                 minimumValue: "100%", style: style, pressure: nil)])
                 }
             case .cpu, .cpuTemperature:
@@ -688,7 +696,7 @@ enum MenuBarRenderer {
 
     private static func reservedWidth(for metric: MenuBarMetric, preset: MenuBarPreset) -> Int {
         switch (preset, metric) {
-        case (_, .claudeUsage), (_, .codexUsage):
+        case (_, .claudeUsage), (_, .codexUsage), (_, .openCodeUsage), (_, .copilotUsage):
             return 16
         case (_, .cpu), (_, .gpu):
             return 11      // symbol + " CPU 100%"
@@ -770,11 +778,12 @@ enum MenuBarRenderer {
                                                     style: style,
                                                     pressure: pressure,
                                                     warning: warning))
-            case let .usageBarBlock(label, fraction, style, pressure):
+            case let .usageBarBlock(label, fraction, style, pressure, colorFraction):
                 result.append(usageBarBlockAttachment(label: label,
                                                       fraction: fraction,
                                                       style: style,
-                                                      pressure: pressure))
+                                                      pressure: pressure,
+                                                      colorFraction: colorFraction))
             case let .networkBlock(down, up, style):
                 result.append(networkBlockAttachment(down: down, up: up, style: style))
             case let .diskActivityBlock(read, write, style):
@@ -846,11 +855,13 @@ enum MenuBarRenderer {
     private static func usageBarBlockAttachment(label: String,
                                                 fraction: Double?,
                                                 style: MenuBarBlockStyle,
-                                                pressure: MemoryPressure?) -> NSAttributedString {
+                                                pressure: MemoryPressure?,
+                                                colorFraction: Double? = nil) -> NSAttributedString {
         let image = usageBarBlockImage(label: label,
                                        fraction: fraction,
                                        style: style,
-                                       pressure: pressure)
+                                       pressure: pressure,
+                                       colorFraction: colorFraction)
         let attachment = NSTextAttachment()
         attachment.image = image
         // The gauge outline fills the image symmetrically, so the offset
@@ -969,10 +980,11 @@ enum MenuBarRenderer {
     private static func usageBarBlockImage(label: String,
                                            fraction: Double?,
                                            style: MenuBarBlockStyle,
-                                           pressure: MemoryPressure?) -> NSImage {
+                                           pressure: MemoryPressure?,
+                                           colorFraction: Double? = nil) -> NSImage {
         let innerSteps = style == .readable ? 17 : 15
         let fillLevel = fraction.map { MenuBarUsageBarSupport.fillLevel(for: $0, steps: innerSteps) }
-        let fillColorHex = fraction.map {
+        let fillColorHex = (colorFraction ?? fraction).map {
             MenuBarUsageBarSupport.currentColorHex(for: MenuBarUsageBarSupport.currentLevel(for: $0))
         } ?? "missing"
         let pressureKey = pressure.map(String.init(describing:)) ?? "none"
@@ -1020,7 +1032,7 @@ enum MenuBarRenderer {
                                      width: barWidth - 1,
                                      height: barHeight - 1)
             let outline = NSBezierPath(roundedRect: outlineRect, xRadius: 2.2, yRadius: 2.2)
-            NSColor.labelColor.setStroke()
+            (colorFraction == nil ? NSColor.labelColor : usageBarColor(hex: fillColorHex)).setStroke()
             outline.lineWidth = 1.15
             outline.stroke()
 

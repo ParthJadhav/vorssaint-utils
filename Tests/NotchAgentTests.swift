@@ -51,18 +51,18 @@ enum NotchAgentTests {
         defaults.set(true, forKey: AppFeature.notchAgents.availabilityKey)
         suite.expect(NotchAgentSupport.readingProviders(in: defaults).isEmpty,
                      "no agent reader starts with both surfaces off")
-        defaults.set(true, forKey: DefaultsKey.menuBarCodexUsage)
+        defaults.set(true, forKey: MenuBarAgentSupport.enabledKey(for: .codex))
         suite.expect(NotchAgentSupport.readingProviders(in: defaults) == [.codex],
                      "a pinned Codex reads only Codex without Dynamic Island")
-        defaults.set(true, forKey: DefaultsKey.menuBarClaudeUsage)
+        defaults.set(true, forKey: MenuBarAgentSupport.enabledKey(for: .claude))
         suite.expect(NotchAgentSupport.readingProviders(in: defaults) == [.claude, .codex],
                      "both pinned agents read without installing the island")
         defaults.set(false, forKey: AppFeature.notchAgents.availabilityKey)
         suite.expect(NotchAgentSupport.readingProviders(in: defaults).isEmpty,
                      "uninstalling AI Agents stops even pinned readers")
         defaults.set(true, forKey: AppFeature.notchAgents.availabilityKey)
-        defaults.set(false, forKey: DefaultsKey.menuBarClaudeUsage)
-        defaults.set(false, forKey: DefaultsKey.menuBarCodexUsage)
+        defaults.set(false, forKey: MenuBarAgentSupport.enabledKey(for: .claude))
+        defaults.set(false, forKey: MenuBarAgentSupport.enabledKey(for: .codex))
         suite.expect(NotchAgentSupport.readingProviders(in: defaults).isEmpty,
                      "unpinning the final agent stops reading")
 
@@ -81,14 +81,14 @@ enum NotchAgentTests {
             MenuBarAgentSupport.window(for: .codex, in: snapshot, defaults: defaults, now: now)
         }
         suite.expect(selected()?.id == "weekly", "automatic menu bar quota picks the most used window")
-        suite.expect(MenuBarAgentSupport.fraction(for: weekly, in: defaults) == 0.8,
+        suite.expect((MenuBarAgentSupport.reading(for: .codex, snapshot: snapshot, defaults: defaults, now: now).fraction ?? -1) == 0.8,
                      "menu bar percentages default to used")
-        defaults.set("remaining", forKey: DefaultsKey.menuBarAgentLimitDisplay)
-        suite.expectClose(MenuBarAgentSupport.fraction(for: weekly, in: defaults), 0.2,
+        defaults.set("remaining", forKey: MenuBarAgentSupport.displayKey(for: .codex))
+        suite.expectClose(MenuBarAgentSupport.reading(for: .codex, snapshot: snapshot, defaults: defaults, now: now).fraction ?? -1, 0.2,
                           "remaining quota is distinct from usage")
-        defaults.set("session", forKey: DefaultsKey.menuBarAgentLimitFocus)
+        defaults.set("session", forKey: MenuBarAgentSupport.focusKey(for: .codex))
         suite.expect(selected()?.id == "session", "the session quota can be pinned independently of the island")
-        defaults.set("weekly", forKey: DefaultsKey.menuBarAgentLimitFocus)
+        defaults.set("weekly", forKey: MenuBarAgentSupport.focusKey(for: .codex))
         suite.expect(selected()?.id == "weekly", "the weekly quota can be pinned")
         snapshot.limits[.codex]?.windows = [session]
         suite.expect(selected()?.id == "session", "a missing chosen window uses the known plan window")
@@ -103,10 +103,78 @@ enum NotchAgentTests {
                      "a confirmed renewal clears the old reading")
         suite.expect(MenuBarAgentSupport.window(for: .claude, in: snapshot, defaults: defaults, now: now) == nil,
                      "one agent's quota never fills in for another")
+        let remaining = MenuBarAgentSupport.reading(for: .codex, snapshot: snapshot, defaults: defaults, now: now)
+        suite.expectClose(remaining.fraction ?? -1, 0.75, "remaining quota controls bar fill")
+        suite.expectClose(remaining.usedFraction ?? -1, 0.25, "remaining quota colors still use consumed usage")
+        suite.expect(MenuBarAgentSupport.display(for: .claude, in: defaults) == .used
+                     && MenuBarAgentSupport.focus(for: .claude, in: defaults) == .mostUsed,
+                     "one agent's window and display choices do not change another's")
+
+        var periodUsage = AgentPeriodUsage()
+        periodUsage.byProvider[.copilot] = AgentTotals(tokens: AgentTokens(input: 1000, output: 200), cost: 0.5)
+        snapshot.seen.insert(.copilot)
+        snapshot.periods[.today] = periodUsage
+        suite.expect(MenuBarAgentSupport.readout(for: .copilot, in: defaults) == .tokens
+                     && !MenuBarAgentSupport.readouts(for: .copilot).contains(.limit),
+                     "agents without plan quotas offer token, cost and live readouts")
+        let copilot = MenuBarAgentSupport.reading(for: .copilot, snapshot: snapshot, defaults: defaults, now: now)
+        suite.expect(copilot.value == AgentFormat.tokens(200) && copilot.fraction == nil,
+                     "Copilot tokens are readable without inventing a quota")
+        defaults.set("cost", forKey: MenuBarAgentSupport.readoutKey(for: .copilot))
+        suite.expect(MenuBarAgentSupport.reading(for: .copilot, snapshot: snapshot, defaults: defaults, now: now).value
+                     == AgentFormat.cost(0.5), "API value is selectable per agent")
+        snapshot.periods[.today]?.byProvider[.copilot]?.unpriced = 1
+        suite.expect(MenuBarAgentSupport.reading(for: .copilot, snapshot: snapshot, defaults: defaults, now: now).value == "—",
+                     "partly unpriced usage does not masquerade as a complete API value")
+        defaults.set("week", forKey: MenuBarAgentSupport.periodKey(for: .copilot))
+        snapshot.periods[.week] = periodUsage
+        suite.expect(MenuBarAgentSupport.reading(for: .copilot, snapshot: snapshot, defaults: defaults, now: now).value
+                     == AgentFormat.cost(0.5), "each agent can select a different usage period")
+        defaults.set("elapsed", forKey: MenuBarAgentSupport.readoutKey(for: .opencode))
+        snapshot.live = [AgentLiveSession(id: "open", provider: .opencode, started: now.addingTimeInterval(-65),
+            lastActivity: now, model: "test", project: "example", tokens: AgentTokens(), cost: 0)]
+        suite.expect(MenuBarAgentSupport.reading(for: .opencode, snapshot: snapshot, defaults: defaults, now: now).value == "1:05",
+                     "OpenCode can show the elapsed time of its live work")
+
         let keys = SettingsBackupSupport.exportKeys()
-        suite.expect([DefaultsKey.menuBarClaudeUsage, DefaultsKey.menuBarCodexUsage,
-                      DefaultsKey.menuBarAgentLimitFocus, DefaultsKey.menuBarAgentLimitDisplay].allSatisfy(keys.contains),
-                     "agent menu bar selections and display options travel in settings backups")
+        for provider in AgentProvider.allCases {
+            defaults.set(true, forKey: MenuBarAgentSupport.enabledKey(for: provider))
+            suite.expect([MenuBarAgentSupport.enabledKey(for: provider), MenuBarAgentSupport.readoutKey(for: provider),
+                          MenuBarAgentSupport.periodKey(for: provider), MenuBarAgentSupport.focusKey(for: provider),
+                          MenuBarAgentSupport.displayKey(for: provider)].allSatisfy(keys.contains),
+                         "every configurable agent preference travels in settings backups")
+        }
+        suite.expect(MenuBarAgentSupport.providers(in: defaults) == AgentProvider.allCases,
+                     "all supported providers can be independently pinned")
+
+        var quiet = AgentUsageSnapshot()
+        quiet.loaded = true
+        quiet.now = now
+        quiet.limits[.codex] = AgentLimits(provider: .codex, windows: [session], observedAt: now, source: .sessionLog)
+        suite.expect(!AgentUsageSummary.movesWithClock(quiet, now: now.addingTimeInterval(299)),
+                     "a quiet quota does not redraw before its renewal")
+        suite.expect(AgentUsageSummary.movesWithClock(quiet, now: now.addingTimeInterval(300)),
+                     "a quiet agent-only quota publishes when its deadline is reached")
+        quiet.now = now.addingTimeInterval(300)
+        suite.expect(!AgentUsageSummary.movesWithClock(quiet, now: now.addingTimeInterval(301)),
+                     "an already published renewal does not cause perpetual idle redraws")
+        quiet.live = snapshot.live
+        suite.expect(AgentUsageSummary.movesWithClock(quiet, now: now.addingTimeInterval(301)),
+                     "elapsed live readouts advance even without new log lines")
+
+        defaults.set(true, forKey: AppFeature.notch.availabilityKey)
+        defaults.set(true, forKey: DefaultsKey.notchEnabled)
+        defaults.set(true, forKey: DefaultsKey.notchAgentsEnabled)
+        defaults.set(false, forKey: DefaultsKey.notchAgentsClaude)
+        defaults.set(false, forKey: DefaultsKey.notchAgentsOpenCode)
+        defaults.set(false, forKey: DefaultsKey.notchAgentsCopilot)
+        defaults.set(true, forKey: DefaultsKey.notchAgentsCodex)
+        snapshot.periods[.today]?.byProvider[.claude] = AgentTotals(cost: 100)
+        snapshot.periods[.today]?.byProvider[.codex] = AgentTotals(cost: 2)
+        suite.expect(NotchAgentSupport.alertProviders(in: defaults) == [.codex]
+                     && NotchAgentSupport.alertSpend(snapshot, in: defaults) == 2,
+                     "menu-only agents do not contribute to the island's budget or provider set")
+
     }
 
     private static func line(_ json: String) -> Data { Data(json.utf8) }

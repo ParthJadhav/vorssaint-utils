@@ -265,8 +265,9 @@ final class AgentUsageService: ObservableObject {
             previousLimits = store.limits
             // A budget already passed before launch is history, not news.
             let today = Calendar.autoupdatingCurrent.startOfDay(for: now)
+            let alertProviders = Set(NotchAgentSupport.alertProviders())
             if let budget = NotchAgentSupport.dailyBudget(),
-               store.records.lazy.filter({ $0.date >= today }).reduce(0.0, { $0 + ($1.cost ?? 0) }) >= budget {
+               store.records.lazy.filter({ $0.date >= today && alertProviders.contains($0.provider) }).reduce(0.0, { $0 + ($1.cost ?? 0) }) >= budget {
                 budgetDay = today
             }
             watch(roots)
@@ -598,12 +599,14 @@ final class AgentUsageService: ObservableObject {
         let session = readerSession
         DispatchQueue.main.async { [weak self] in
             guard let self, self.running, self.session == session else { return }
+            guard NotchAgentSupport.isEnabled() else { return }
+            let alertProviders = NotchAgentSupport.providers()
             switch event {
             case .finished(let provider, let duration, _, _, _):
-                guard self.providers.contains(provider), let minimum = NotchAgentSupport.finishMinimum(),
+                guard alertProviders.contains(provider), let minimum = NotchAgentSupport.finishMinimum(),
                       duration >= minimum else { return }
             case .limitWarning(let provider, _), .limitReset(let provider, _):
-                guard self.providers.contains(provider), NotchAgentSupport.limitThreshold() != nil else { return }
+                guard alertProviders.contains(provider), NotchAgentSupport.limitThreshold() != nil else { return }
             case .budgetReached:
                 guard NotchAgentSupport.dailyBudget() != nil else { return }
             }
@@ -646,7 +649,7 @@ final class AgentUsageService: ObservableObject {
     private func checkBudget(_ snapshot: AgentUsageSnapshot) {
         guard store.reportsTransitions, let budget = NotchAgentSupport.dailyBudget() else { return }
         let today = Calendar.autoupdatingCurrent.startOfDay(for: snapshot.now)
-        let spent = snapshot.usage(.today).total.cost
+        let spent = NotchAgentSupport.alertSpend(snapshot)
         guard spent >= budget, budgetDay != today else { return }
         budgetDay = today
         report(.budgetReached(spent: spent, budget: budget))

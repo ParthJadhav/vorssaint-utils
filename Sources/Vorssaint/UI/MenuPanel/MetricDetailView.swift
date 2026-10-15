@@ -96,7 +96,7 @@ enum MetricDetailKind: String, Equatable, Identifiable {
 extension MenuBarMetric {
     var detailKind: MetricDetailKind? {
         switch self {
-        case .claudeUsage, .codexUsage:
+        case .claudeUsage, .codexUsage, .openCodeUsage, .copilotUsage:
             return nil
         case .cpu, .cpuTemperature:
             return .cpu

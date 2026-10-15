@@ -380,8 +380,7 @@ private struct MenuBarMetricTile: View {
     @Environment(\.colorScheme) private var colorScheme
     let metric: MenuBarMetric
     @AppStorage private var shown: Bool
-    @AppStorage(DefaultsKey.menuBarAgentLimitFocus) private var agentFocus = "mostUsed"
-    @AppStorage(DefaultsKey.menuBarAgentLimitDisplay) private var agentDisplay = "used"
+    @AppStorage private var agentReadout: String
     @AppStorage(DefaultsKey.menuBarMemoryStyle) private var memoryStyle = "percent"
     @AppStorage(DefaultsKey.menuBarNetworkUploadFirst) private var uploadFirst = false
     @AppStorage(DiskMenuBarStyle.defaultsKey) private var diskStyle = DiskMenuBarStyle.percent
@@ -389,6 +388,8 @@ private struct MenuBarMetricTile: View {
     init(metric: MenuBarMetric) {
         self.metric = metric
         _shown = AppStorage(wrappedValue: false, metric.defaultsKey)
+        _agentReadout = AppStorage(wrappedValue: metric.agentProvider.map { MenuBarAgentSupport.defaultReadout(for: $0).rawValue } ?? "limit",
+                                  metric.agentProvider.map { MenuBarAgentSupport.readoutKey(for: $0) } ?? "menuBarAgent.unused")
     }
 
     var body: some View {
@@ -399,9 +400,8 @@ private struct MenuBarMetricTile: View {
     /// What the reading's option makes the menu bar show, in its own terms.
     private var optionsSummary: String {
         switch metric {
-        case .claudeUsage, .codexUsage:
-            let text = FeatureStrings.notchAgents(l10n.language)
-            return agentDisplay == "remaining" ? text.remaining : text.used
+        case .claudeUsage, .codexUsage, .openCodeUsage, .copilotUsage:
+            return FeatureStrings.notchAgents(l10n.language).readout(NotchAgentReadout(rawValue: agentReadout) ?? .limit)
         case .memory:
             return Defaults.sanitizedMenuBarMemoryStyle(memoryStyle) != "percent"
                 ? l10n.s.monitorMemoryPressureDot : FeatureStrings.mouseClickDebounce(l10n.language).moreOptions
@@ -418,19 +418,8 @@ private struct MenuBarMetricTile: View {
 
     private var options: AnyView? {
         switch metric {
-        case .claudeUsage, .codexUsage:
-            let text = FeatureStrings.notchAgents(l10n.language)
-            return AnyView(VStack(alignment: .leading, spacing: 10) {
-                SettingsChoiceRow(symbol: "percent", title: text.limitsAs, selection: $agentDisplay) {
-                    Text(text.used).tag(NotchAgentLimitDisplay.used.rawValue)
-                    Text(text.remaining).tag(NotchAgentLimitDisplay.remaining.rawValue)
-                }
-                SettingsMenuRow(symbol: "clock", title: text.limitFocus, selection: $agentFocus) {
-                    ForEach(NotchAgentLimitFocus.allCases) { focus in
-                        Text(text.limitFocus(focus)).tag(focus.rawValue)
-                    }
-                }
-            })
+        case .claudeUsage, .codexUsage, .openCodeUsage, .copilotUsage:
+            return metric.agentProvider.map { AnyView(MenuBarAgentOptions(provider: $0)) }
         case .memory:
             return AnyView(MonitorTokenOption(
                 symbol: "circle.fill",
